@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Green POS Simulator</title>
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <style>
+        :root { --primary-green: #27ae60; --light-green: #eef9f1; --white: #ffffff; --text: #2c3e50; }
+        
+        body { font-family: 'Kanit', sans-serif; margin: 0; background-color: var(--white); color: var(--text); padding-bottom: 80px; }
+        
+        /* Navigation Bottom */
+        .nav-bar { position: fixed; bottom: 0; width: 100%; height: 70px; background: var(--white); display: flex; box-shadow: 0 -2px 15px rgba(0,0,0,0.08); z-index: 1000; border-top: 1px solid #eee; }
+        .nav-item { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 12px; cursor: pointer; color: #bdc3c7; transition: 0.3s; }
+        .nav-item.active { color: var(--primary-green); }
+        .nav-icon { font-size: 20px; margin-bottom: 4px; }
+
+        .container { padding: 15px; }
+        
+        /* Header Button */
+        .btn-add-product { background: var(--primary-green); color: white; border: none; padding: 15px; width: 100%; border-radius: 15px; font-size: 16px; font-weight: bold; margin-bottom: 20px; cursor: pointer; box-shadow: 0 4px 6px rgba(39, 174, 96, 0.2); }
+
+        /* Receipt Style */
+        .receipt-card { background: var(--light-green); border-radius: 15px; padding: 15px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #d4efdf; }
+        .receipt-info { display: flex; flex-direction: column; }
+        .receipt-total { font-weight: bold; color: var(--primary-green); font-size: 18px; }
+
+        /* Store & Scanner */
+        .camera-btn { font-size: 40px; background: var(--light-green); border: 2px dashed var(--primary-green); border-radius: 50%; width: 80px; height: 80px; cursor: pointer; display: block; margin: 0 auto 20px; }
+        #reader { width: 100%; border-radius: 15px; overflow: hidden; margin-bottom: 20px; }
+        
+        .product-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .product-card { background: var(--white); border: 1px solid #eee; padding: 10px; border-radius: 12px; text-align: center; }
+        .product-card svg { max-width: 100%; height: auto; }
+
+        .hidden { display: none; }
+        input { width: 100%; padding: 12px; margin: 8px 0; border: 1px solid #ddd; border-radius: 10px; box-sizing: border-box; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <!-- หน้าหลัก (ใบเสร็จ) -->
+    <div id="page-receipts">
+        <button class="btn-add-product" onclick="showAddProduct()">+ เพิ่มและจัดการรายการสินค้า</button>
+        <div id="receipt-list"></div>
+    </div>
+
+    <!-- หน้า My Store Barcode -->
+    <div id="page-store" class="hidden">
+        <button class="camera-btn" onclick="toggleScanner()">📸</button>
+        <div id="reader"></div>
+        <div id="scan-preview" style="text-align: center; margin-bottom: 10px; font-weight: bold;"></div>
+        <button id="btn-finalize" class="btn-add-product hidden" onclick="finalizeReceipt()">สร้างใบเสร็จ</button>
+        <hr style="border: 0.5px solid #eee;">
+        <h3>คลังบาร์โค้ดสินค้า</h3>
+        <div id="product-list" class="product-grid"></div>
+    </div>
+
+    <!-- ส่วนเพิ่มสินค้า (Popup แบบง่าย) -->
+    <div id="page-add-product" class="hidden">
+        <h3>ข้อมูลสินค้าใหม่</h3>
+        <input type="text" id="p-name" placeholder="ชื่อสินค้า">
+        <input type="number" id="p-price" placeholder="ราคาสินค้า (บาท)">
+        <button class="btn-add-product" onclick="saveProduct()">บันทึกรายการ</button>
+        <button onclick="switchPage('receipts')" style="background:none; border:none; color:gray; width:100%;">ย้อนกลับ</button>
+    </div>
+</div>
+
+<nav class="nav-bar">
+    <div class="nav-item active" onclick="switchPage('receipts')">
+        <span class="nav-icon">📄</span>
+        <span>หน้าหลัก</span>
+    </div>
+    <div class="nav-item" onclick="switchPage('store')">
+        <span class="nav-icon">🏷️</span>
+        <span>My Store</span>
+    </div>
+</nav>
+
+<script>
+    let products = JSON.parse(localStorage.getItem('products')) || [];
+    let receipts = JSON.parse(localStorage.getItem('receipts')) || [];
+    let currentCart = [];
+    const scanner = new Html5Qrcode("reader");
+
+    function switchPage(page) {
+        document.getElementById('page-receipts').classList.add('hidden');
+        document.getElementById('page-store').classList.add('hidden');
+        document.getElementById('page-add-product').classList.add('hidden');
+        
+        document.getElementById('page-' + page).classList.remove('hidden');
+        
+        document.querySelectorAll('.nav-item').forEach((el, i) => {
+            el.classList.toggle('active', (i === 0 && page === 'receipts') || (i === 1 && page === 'store'));
+        });
+
+        if(page === 'receipts') renderReceipts();
+        if(page === 'store') renderStore();
+    }
+
+    function showAddProduct() {
+        document.getElementById('page-receipts').classList.add('hidden');
+        document.getElementById('page-add-product').classList.remove('hidden');
+    }
+
+    function saveProduct() {
+        const name = document.getElementById('p-name').value;
+        const price = document.getElementById('p-price').value;
+        if(name && price) {
+            const id = "ID" + Math.floor(Math.random() * 9000 + 1000);
+            products.push({ id, name, price: parseFloat(price) });
+            localStorage.setItem('products', JSON.stringify(products));
+            document.getElementById('p-name').value = '';
+            document.getElementById('p-price').value = '';
+            switchPage('store');
+        }
+    }
+
+    function renderStore() {
+        const list = document.getElementById('product-list');
+        list.innerHTML = '';
+        products.forEach(p => {
+            const card = document.createElement('div');
+            card.className = 'product-card';
+            card.innerHTML = `<div><strong>${p.name}</strong></div><div style="color:var(--primary-green)">${p.price}.-</div><svg id="code-${p.id}"></svg>`;
+            list.appendChild(card);
+            JsBarcode(`#code-${p.id}`, p.id, { height: 30, width: 1.5, fontSize: 10 });
+        });
+    }
+
+    function toggleScanner() {
+        const readerDiv = document.getElementById('reader');
+        if (readerDiv.style.display === 'block') {
+            scanner.stop();
+            readerDiv.style.display = 'none';
+        } else {
+            readerDiv.style.display = 'block';
+            scanner.start({ facingMode: "environment" }, { fps: 15, qrbox: 250 }, (text) => {
+                const p = products.find(prod => prod.id === text);
+                if(p) {
+                    currentCart.push(p);
+                    document.getElementById('scan-preview').innerText = `สแกนพบ: ${p.name} (${currentCart.length} ชิ้น)`;
+                    document.getElementById('btn-finalize').classList.remove('hidden');
+                }
+            });
+        }
+    }
+
+    function finalizeReceipt() {
+        const total = currentCart.reduce((s, i) => s + i.price, 0);
+        const receipt = {
+            id: "#" + Math.floor(Math.random() * 10000),
+            total: total,
+            count: currentCart.length,
+            time: new Date().toLocaleTimeString()
+        };
+        receipts.unshift(receipt);
+        localStorage.setItem('receipts', JSON.stringify(receipts));
+        currentCart = [];
+        document.getElementById('btn-finalize').classList.add('hidden');
+        document.getElementById('scan-preview').innerText = '';
+        alert("สร้างใบเสร็จเรียบร้อย!");
+        switchPage('receipts');
+    }
+
+    function renderReceipts() {
+        const list = document.getElementById('receipt-list');
+        list.innerHTML = '';
+        receipts.forEach(r => {
+            list.innerHTML += `
+                <div class="receipt-card">
+                    <div class="receipt-info">
+                        <strong>ใบเสร็จ ${r.id}</strong>
+                        <small>${r.time} • ${r.count} รายการ</small>
+                    </div>
+                    <div class="receipt-total">฿${r.total}</div>
+                </div>`;
+        });
+    }
+
+    renderReceipts();
+</script>
+</body>
+</html>
