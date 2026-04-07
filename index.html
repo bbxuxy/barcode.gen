@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Green POS & Stock System</title>
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root { --primary: #27ae60; --bg: #f8faf8; --danger: #e74c3c; }
+        body { font-family: 'Sarabun', sans-serif; margin: 0; background: var(--bg); padding-bottom: 80px; -webkit-tap-highlight-color: transparent; }
+        .container { padding: 15px; max-width: 500px; margin: auto; }
+        .nav-bar { position: fixed; bottom: 0; width: 100%; height: 65px; background: #fff; display: flex; box-shadow: 0 -2px 10px rgba(0,0,0,0.1); z-index: 9999; left: 0; }
+        .nav-item { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 12px; color: #95a5a6; cursor: pointer; border: none; background: none; }
+        .nav-item.active { color: var(--primary); font-weight: bold; }
+        .card { background: #fff; border-radius: 15px; padding: 15px; margin-bottom: 10px; border: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 5px rgba(0,0,0,0.03); }
+        .btn-green { background: var(--primary); color: white; border: none; padding: 14px; width: 100%; border-radius: 12px; font-weight: bold; cursor: pointer; font-size: 16px; }
+        .btn-outline { background: #fff; color: var(--primary); border: 2px solid var(--primary); padding: 10px; border-radius: 20px; font-weight: bold; cursor: pointer; margin-bottom: 15px; width: 100%; }
+        input { width: 100%; padding: 14px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 10px; box-sizing: border-box; font-size: 16px; }
+        .scanner-container { width: 100%; border-radius: 15px; overflow: hidden; background: #000; display: none; margin-bottom: 15px; border: 3px solid var(--primary); min-height: 250px; }
+        #reader, #reader-add, #reader-stock { width: 100% !important; }
+        .hidden { display: none !important; }
+        .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: none; justify-content: center; align-items: center; z-index: 10000; }
+        .modal-content { background: #fff; padding: 25px; border-radius: 20px; width: 85%; max-width: 350px; text-align: center; }
+        .stock-count { font-weight: bold; }
+        .zero-stock { color: var(--danger); }
+        .action-btn { border: none; background: #f1f2f6; padding: 8px; border-radius: 8px; margin-left: 5px; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div id="page-receipts">
+        <h2>ประวัติการขาย</h2>
+        <button class="btn-green" style="margin-bottom:15px; background:#34495e" onclick="showPage('add-product')">+ ลงทะเบียนสินค้าใหม่</button>
+        <div id="receipt-list"></div>
+    </div>
+
+    <div id="page-store" class="hidden">
+        <div style="text-align: center;">
+            <button style="font-size:35px; background:#fff; border:2px solid var(--primary); border-radius:50%; width:75px; height:75px; margin-bottom:10px;" onclick="toggleScanner('reader')">📸</button>
+            <div id="wrap-reader" class="scanner-container"><div id="reader"></div></div>
+            <p id="scan-status" style="font-weight:bold; color:#7f8c8d;">สแกนเพื่อขาย</p>
+        </div>
+        <div id="cart-preview" class="card hidden" style="flex-direction:column; border:2px solid var(--primary);">
+            <div id="cart-items" style="width:100%; margin-bottom:15px;"></div>
+            <button class="btn-green" onclick="finalizeReceipt()">บันทึกใบเสร็จ</button>
+        </div>
+        <div id="store-product-list"></div>
+    </div>
+
+    <div id="page-stock" class="hidden">
+        <h2>คลังสินค้า</h2>
+        <button class="btn-outline" onclick="openStockMenu()">📦 จัดการสต็อก / รายการสินค้า</button>
+        <div id="stock-list"></div>
+    </div>
+
+    <div id="page-add-product" class="hidden">
+        <h3>ลงทะเบียนสินค้า</h3>
+        <button class="btn-green" onclick="toggleScanner('reader-add')" style="background:#3498db; margin-bottom:15px;">📷 สแกนรหัส</button>
+        <div id="wrap-reader-add" class="scanner-container"><div id="reader-add"></div></div>
+        <input type="text" id="p-id" placeholder="รหัสสินค้า">
+        <input type="text" id="p-name" placeholder="ชื่อสินค้า">
+        <input type="number" id="p-price" placeholder="ราคา">
+        <button class="btn-green" onclick="saveProduct()">บันทึก</button>
+        <button onclick="showPage('receipts')" style="width:100%; border:none; background:none; margin-top:15px; color:#95a5a6;">ยกเลิก</button>
+    </div>
+</div>
+
+<div id="main-modal" class="modal" onclick="closeModal()">
+    <div class="modal-content" onclick="event.stopPropagation()">
+        <div id="modal-body"></div>
+        <button id="modal-close-btn" class="btn-green" style="margin-top:20px; background:#bdc3c7;" onclick="closeModal()">ปิด</button>
+    </div>
+</div>
+
+<nav class="nav-bar">
+    <div id="nav-receipts" class="nav-item active" onclick="showPage('receipts')">📄 ประวัติ</div>
+    <div id="nav-store" class="nav-item" onclick="showPage('store')">🏷️ ขาย</div>
+    <div id="nav-stock" class="nav-item" onclick="showPage('stock')">📦 สต็อก</div>
+</nav>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getDatabase, ref, set, push, onValue, remove, update } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+
+    const db = getDatabase(initializeApp({ databaseURL: "https://yaya-9f825-default-rtdb.firebaseio.com" }));
+    let products = [], currentCart = {}, html5QrCode = null, isCooldown = false, currentStream = null;
+
+    function playBeep() {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain); gain.connect(audioCtx.destination);
+        osc.frequency.value = 1500; gain.gain.value = 0.1;
+        osc.start(); osc.stop(audioCtx.currentTime + 0.1);
+    }
+
+    async function releaseCamera() {
+        if (html5QrCode) { try { await html5QrCode.stop(); await html5QrCode.clear(); } catch (e) {} html5QrCode = null; }
+        if (currentStream) { currentStream.getTracks().forEach(t => t.stop()); currentStream = null; }
+        document.querySelectorAll('.scanner-container').forEach(c => {
+            c.style.display = 'none';
+            c.innerHTML = `<div id="${c.id.replace('wrap-','')}"></div>`;
+        });
+    }
+
+    window.showPage = async (p) => {
+        await releaseCamera();
+        document.querySelectorAll('.container > div').forEach(div => div.classList.add('hidden'));
+        document.getElementById('page-' + p).classList.remove('hidden');
+        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+        document.getElementById('nav-' + (p === 'add-product' ? 'receipts' : p)).classList.add('active');
+    };
+
+    window.toggleScanner = async (elId) => {
+        if (html5QrCode) { await releaseCamera(); return; }
+        const wrap = document.getElementById('wrap-' + elId);
+        wrap.style.display = 'block';
+        try {
+            currentStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+            html5QrCode = new Html5Qrcode(elId);
+            await html5QrCode.start({ facingMode: "environment" }, { fps: 20, qrbox: 250 }, (text) => {
+                if(isCooldown) return;
+                playBeep();
+                if(elId === 'reader-add') { document.getElementById('p-id').value = text; releaseCamera(); }
+                else if(elId === 'reader-stock') { handleStockIn(text); }
+                else {
+                    const p = products.find(i => i.id === text);
+                    if(p && p.stock > 0) {
+                        currentCart[p.id] = currentCart[p.id] ? {...currentCart[p.id], qty: currentCart[p.id].qty + 1} : {...p, qty: 1};
+                        isCooldown = true; updateCart();
+                        setTimeout(() => { isCooldown = false; }, 800);
+                    } else if(p && p.stock <= 0) {
+                        alert("สินค้าหมดสต็อก!");
+                    }
+                }
+            });
+        } catch (err) { wrap.style.display = 'none'; }
+    };
+
+    // ระบบเติมสต็อก
+    function handleStockIn(id) {
+        const p = products.find(i => i.id === id);
+        if(p) {
+            isCooldown = true;
+            update(ref(db, 'products/' + id), { stock: (p.stock || 0) + 1 });
+            document.getElementById('scan-status-stock').innerText = `เพิ่ม ${p.name} แล้ว`;
+            setTimeout(() => { isCooldown = false; document.getElementById('scan-status-stock').innerText = "สแกนต่อเพื่อเติมสต็อก"; }, 800);
+        }
+    }
+
+    window.saveProduct = async () => {
+        const id = document.getElementById('p-id').value, name = document.getElementById('p-name').value, price = document.getElementById('p-price').value;
+        if(id && name && price) {
+            await releaseCamera();
+            set(ref(db, 'products/' + id), { id, name, price: parseFloat(price), stock: 0 });
+            showPage('stock');
+        }
+    };
+
+    window.finalizeReceipt = async () => {
+        const items = Object.values(currentCart);
+        if(!items.length) return;
+        await releaseCamera();
+        // หักสต็อก
+        for(let item of items) {
+            const p = products.find(x => x.id === item.id);
+            update(ref(db, 'products/' + item.id), { stock: p.stock - item.qty });
+        }
+        await push(ref(db, 'receipts'), { items, total: items.reduce((s, i) => s + (i.price * i.qty), 0), date: new Date().toLocaleString('th-TH') });
+        currentCart = {}; updateCart(); showPage('receipts');
+    };
+
+    function updateCart() {
+        const items = Object.values(currentCart);
+        document.getElementById('cart-preview').classList.toggle('hidden', !items.length);
+        document.getElementById('cart-items').innerHTML = items.map(i => `<div>${i.name} x${i.qty} = ฿${i.price*i.qty}</div>`).join('');
+    }
+
+    // จัดการข้อมูลสินค้า
+    onValue(ref(db, 'products'), s => {
+        products = s.val() ? Object.values(s.val()) : [];
+        renderLists();
+    });
+
+    function renderLists() {
+        const stockList = document.getElementById('stock-list');
+        const storeList = document.getElementById('store-product-list');
+        stockList.innerHTML = ''; storeList.innerHTML = '';
+
+        products.forEach(p => {
+            const isZero = (p.stock || 0) <= 0;
+            // หน้าสต็อก
+            stockList.innerHTML += `<div class="card">
+                <div><b>${p.name}</b><br><small>฿${p.price}</small></div>
+                <div class="stock-count ${isZero?'zero-stock':''}">สต็อก: ${p.stock || 0}</div>
+            </div>`;
+            // หน้าขาย
+            const div = document.createElement('div'); div.className = 'card';
+            div.innerHTML = `<div><b>${p.name}</b><br>฿${p.price}</div><svg id="bc-${p.id}" style="width:90px;height:40px" onclick="zoomBarcode('${p.id}')"></svg>`;
+            storeList.appendChild(div); JsBarcode(`#bc-${p.id}`, p.id, { height: 25, width: 1.3, fontSize: 11, margin: 0 });
+        });
+    }
+
+    onValue(ref(db, 'receipts'), s => {
+        const list = document.getElementById('receipt-list'); list.innerHTML = '';
+        const data = s.val() ? Object.values(s.val()).reverse() : [];
+        data.forEach(r => {
+            const div = document.createElement('div'); div.className = 'card'; div.onclick = () => viewReceipt(r);
+            div.innerHTML = `<div><b>${r.date}</b></div><b>฿${r.total}</b>`; list.appendChild(div);
+        });
+    });
+
+    // เมนูจัดการสต็อก
+    window.openStockMenu = () => {
+        document.getElementById('modal-body').innerHTML = `
+            <h3>เลือกรายการ</h3>
+            <button class="btn-green" style="margin-bottom:10px;" onclick="startStockIn()">➕ เติมสต็อกสินค้า</button>
+            <button class="btn-green" style="background:#34495e" onclick="manageProducts()">🛠 จัดการรายการสินค้า</button>
+        `;
+        document.getElementById('main-modal').style.display = 'flex';
+    };
+
+    window.startStockIn = () => {
+        document.getElementById('modal-body').innerHTML = `
+            <button style="font-size:35px; background:#fff; border:2px solid var(--primary); border-radius:50%; width:75px; height:75px; margin-bottom:10px;" onclick="toggleScanner('reader-stock')">📸</button>
+            <div id="wrap-reader-stock" class="scanner-container"><div id="reader-stock"></div></div>
+            <p id="scan-status-stock" style="font-weight:bold;">กดที่กล้องเพื่อสแกนเติมสต็อก</p>
+        `;
+    };
+
+    window.manageProducts = () => {
+        let html = '<h3>จัดการสินค้า</h3><div style="text-align:left; max-height:300px; overflow-y:auto;">';
+        products.forEach(p => {
+            html += `<div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding:10px 0;">
+                <span>${p.name} (฿${p.price})</span>
+                <div>
+                    <button class="action-btn" onclick="editPrice('${p.id}')">✏️</button>
+                    <button class="action-btn" style="color:red" onclick="confirmDelete('${p.id}')">🗑️</button>
+                </div>
+            </div>`;
+        });
+        html += '</div>';
+        document.getElementById('modal-body').innerHTML = html;
+    };
+
+    window.editPrice = (id) => {
+        const p = products.find(x => x.id === id);
+        document.getElementById('modal-body').innerHTML = `
+            <h3>แก้ไขราคา: ${p.name}</h3>
+            <input type="number" id="new-price" value="${p.price}">
+            <button class="btn-green" onclick="updatePrice('${id}')">ตกลง</button>
+        `;
+    };
+
+    window.updatePrice = (id) => {
+        const val = document.getElementById('new-price').value;
+        update(ref(db, 'products/' + id), { price: parseFloat(val) });
+        manageProducts();
+    };
+
+    window.confirmDelete = (id) => {
+        const p = products.find(x => x.id === id);
+        document.getElementById('modal-body').innerHTML = `
+            <h3>ยืนยันการลบ?</h3>
+            <p>ต้องการลบ ${p.name} หรือไม่?</p>
+            <button class="btn-green" style="background:red; margin-bottom:10px;" onclick="deleteProduct('${id}')">ลบทันที</button>
+            <button class="btn-green" style="background:#bdc3c7" onclick="manageProducts()">ยกเลิก</button>
+        `;
+    };
+
+    window.deleteProduct = (id) => {
+        remove(ref(db, 'products/' + id));
+        manageProducts();
+    };
+
+    window.zoomBarcode = (id) => {
+        document.getElementById('modal-body').innerHTML = `<h3>รหัส: ${id}</h3><svg id="zoom-bc"></svg>`;
+        document.getElementById('main-modal').style.display = 'flex'; JsBarcode("#zoom-bc", id, { width: 2, height: 100 });
+    };
+
+    window.viewReceipt = (r) => {
+        document.getElementById('modal-body').innerHTML = `<h3>ใบเสร็จ</h3><small>${r.date}</small><hr>` + r.items.map(i => `<div style="display:flex; justify-content:space-between"><span>${i.name} x${i.qty}</span><span>฿${i.price * i.qty}</span></div>`).join('') + `<hr><b>รวม ฿${r.total}</b>`;
+        document.getElementById('main-modal').style.display = 'flex';
+    };
+
+    window.closeModal = async () => {
+        await releaseCamera();
+        document.getElementById('main-modal').style.display = 'none';
+    };
+</script>
+</body>
+</html>
